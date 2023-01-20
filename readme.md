@@ -63,6 +63,8 @@ epub.render()
 
 -   `lang`:
     Language of the book in 2 letters code (optional). If not specified, will fallback to `en`.
+-   `skipImageNotFound`:
+    If setted to `true`, ignores images or cover loaded from url when the response has a 404 code. If setted to `false`, falls on error. Default is `false` (optional).
 -   `rejectUnauthorized`:
     If setted to `false`, certificate validation is disabled for TLS connections.
 

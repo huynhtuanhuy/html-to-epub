@@ -288,6 +288,7 @@ export interface EpubOptions {
   retries?: number;
   retryDelay?: number;
   concurrency?: number;
+  skipImageNotFound?: boolean;
 }
 
 interface EpubContent {
@@ -340,6 +341,7 @@ export class EPub {
   retries: number;
   retryDelay: number;
   concurrency: number;
+  skipImageNotFound: boolean;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly info: (...args: any[]) => void;
@@ -382,6 +384,7 @@ export class EPub {
     this.concurrency = options.concurrency ?? 1;
     this.retryDelay = options.retryDelay ?? 1000;
     this.verbose = options.verbose ?? false;
+    this.skipImageNotFound = options.skipImageNotFound ?? false;
 
     this.info = info(this.verbose ?? false);
 
@@ -672,7 +675,7 @@ export class EPub {
         writeFileSync(destPath, buffer);
         this.info("[Success] cover image downloaded successfully!");
       } catch (err) {
-        if ((err as AxiosError).response?.status === 404) {
+        if (this.skipImageNotFound && (err as AxiosError).response?.status === 404) {
           this.info("[Download Skip] Cover not found", this.cover);
           return;
         }
@@ -719,7 +722,7 @@ export class EPub {
         writeFileSync(filename, buffer);
         this.info("[Download Success]", image.url);
       } catch (err) {
-        if ((err as AxiosError).response?.status === 404) {
+        if (this.skipImageNotFound && (err as AxiosError).response?.status === 404) {
           this.info("[Download Skip] Image not found", image.url);
           return;
         }

@@ -27,6 +27,14 @@ test.serial("Ebook > generate v3 with concurrency", async (t) => {
   t.is(await runTestOn("book-v3-concurrency"), true);
 });
 
+test.serial("Ebook > generate v3 with skipImageNotFound on cover", async (t) => {
+  t.is(await runTestOn("book-v3-cover-not-found"), true);
+});
+
+test.serial("Ebook > generate v3 with skipImageNotFound on an image src", async (t) => {
+  t.is(await runTestOn("book-v3-image-not-found"), true);
+});
+
 test.serial("Ebook > generate v3 with local file as cover", async (t) => {
   const params = JSON.parse(readFileSync(resolve(__dirname, `./book-v3.json`), { encoding: "utf8" })) as EpubOptions;
   const coverPath = resolve(__dirname, "cover.jpg");
