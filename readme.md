@@ -1,7 +1,7 @@
 [![npm version](https://badge.fury.io/js/@lesjoursfr%2Fhtml-to-epub.svg)](https://badge.fury.io/js/@lesjoursfr%2Fhtml-to-epub)
 [![QC Checks](https://github.com/lesjoursfr/html-to-epub/actions/workflows/quality-control.yml/badge.svg)](https://github.com/lesjoursfr/html-to-epub/actions/workflows/quality-control.yml)
 
-# @lesjoursfr/html-to-epub
+# @dimitrilahaye/html-to-epub
 
 Generate EPUB books from HTML with simple API in Node.js.
 Inspired by [cyrilis/epub-gen](https://github.com/cyrilis/epub-gen/)
