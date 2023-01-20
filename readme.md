@@ -63,6 +63,17 @@ epub.render()
 
 -   `lang`:
     Language of the book in 2 letters code (optional). If not specified, will fallback to `en`.
+-   `rejectUnauthorized`:
+    If setted to `false`, certificate validation is disabled for TLS connections.
+
+    :warning: This makes TLS, and HTTPS by extension, insecure. The use of this environment variable is strongly discouraged. Default is `true` (optional)
+
+-   `retries`:
+    On images downloads, ask to retry `n` times each request which falls on 500-599 range of status code. Default is `0`. (optional)
+-   `retryDelay`:
+    On images downloads, the amount of time (in ms) to initially delay the retry. Default is `100`. Not taken into account if `retries` has been setted at `0`. (optional)
+-   `concurrency`:
+    Process in parallel `n` html contents from urls and files. By default, this option is setted to `1`, which means contents will be processed sequentially. (optional)
 -   `tocTitle`:
     Title of the table of contents. If not specified, will fallback to `Table Of Contents`.
 -   `appendChapterTitles`:

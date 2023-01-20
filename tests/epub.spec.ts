@@ -23,6 +23,20 @@ test.serial("Ebook > generate v3", async (t) => {
   t.is(await runTestOn("book-v3"), true);
 });
 
+test.serial("Ebook > generate v3 with concurrency", async (t) => {
+  t.is(await runTestOn("book-v3-concurrency"), true);
+});
+
+test.serial("Ebook > generate v3 with local file as cover", async (t) => {
+  const params = JSON.parse(readFileSync(resolve(__dirname, `./book-v3.json`), { encoding: "utf8" })) as EpubOptions;
+  const coverPath = resolve(__dirname, "cover.jpg");
+  const output = resolve(__dirname, `./book-v3-with-local-cover.epub`);
+
+  const epub = new EPub({ ...params, cover: coverPath }, output);
+  const op = await epub.render();
+  t.is(op.result === "ok", true);
+});
+
 test.serial("HTML Page > generate v2", async (t) => {
   t.is(await runTestOn("article-v2"), true);
 });

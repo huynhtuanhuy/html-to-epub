@@ -1,27 +1,31 @@
 import archiver from "archiver";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { remove as diacritics } from "diacritics";
 import { renderFile } from "ejs";
 import { encodeXML } from "entities";
-import {
-  createReadStream,
-  createWriteStream,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from "fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import fsExtra from "fs-extra";
 import { Element } from "hast";
+import https from "https";
 import mime from "mime";
 import { basename, dirname, resolve } from "path";
 import rehypeParse from "rehype-parse";
 import rehypeStringify from "rehype-stringify";
+import { attach, getConfig, RetryConfig } from "retry-axios";
+import { concurrencyExecuter } from "rx-queue";
 import { Plugin, unified } from "unified";
 import { visit } from "unist-util-visit";
 import { fileURLToPath } from "url";
 import uslug from "uslug";
+
+const info = (verbose: boolean) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (...args: any[]): void => {
+    if (verbose) {
+      console.info(...args);
+    }
+  };
+};
 
 // Allowed HTML attributes & tags
 const allowedAttributes = [
@@ -69,7 +73,7 @@ const allowedAttributes = [
   "aria-valuemin",
   "aria-valuenow",
   "aria-valuetext",
-  "class",
+  "className",
   "content",
   "contenteditable",
   "contextmenu",
@@ -282,6 +286,10 @@ export interface EpubOptions {
   userAgent?: string;
   verbose?: boolean;
   tempDir?: string;
+  rejectUnauthorized?: boolean;
+  retries?: number;
+  retryDelay?: number;
+  concurrency?: number;
 }
 
 interface EpubContent {
@@ -300,8 +308,8 @@ interface EpubImage {
   id: string;
   url: string;
   dir: string;
-  mediaType: string;
-  extension: string;
+  mediaType: string | null;
+  extension: string | null;
 }
 
 export class EPub {
@@ -330,6 +338,13 @@ export class EPub {
   tempDir: string;
   tempEpubDir: string;
   output: string;
+  rejectUnauthorized: boolean;
+  retries: number;
+  retryDelay: number;
+  concurrency: number;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly info: (...args: any[]) => void;
 
   constructor(options: EpubOptions, output: string) {
     // File ID
@@ -364,7 +379,13 @@ export class EPub {
     this.userAgent =
       options.userAgent ??
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36";
+    this.rejectUnauthorized = options.rejectUnauthorized ?? true;
+    this.retries = options.retries ?? 0;
+    this.concurrency = options.concurrency ?? 1;
+    this.retryDelay = options.retryDelay ?? 1000;
     this.verbose = options.verbose ?? false;
+
+    this.info = info(this.verbose ?? false);
 
     // Temporary folder for work
     this.tempDir = options.tempDir ?? resolve(__dirname, "../tempDir/");
@@ -445,13 +466,11 @@ export class EPub {
 
             if (this.version === 2) {
               if (!allowedXhtml11Tags.includes(node.tagName)) {
-                if (this.verbose) {
-                  console.log(
-                    "Warning (content[" + index + "]):",
-                    node.tagName,
-                    "tag isn't allowed on EPUB 2/XHTML 1.1 DTD."
-                  );
-                }
+                this.info(
+                  "Warning (content[" + index + "]):",
+                  node.tagName,
+                  "tag isn't allowed on EPUB 2/XHTML 1.1 DTD."
+                );
                 node.tagName = "div";
               }
             }
@@ -478,23 +497,16 @@ export class EPub {
             } else {
               id = uuid();
               const mediaType = mime.getType(url.replace(/\?.*/, ""));
-              if (mediaType === null) {
-                if (this.verbose) {
-                  console.error("[Image Error]", `The image can't be processed : ${url}`);
+              extension = mime.getExtension(mediaType ?? "");
+              if (extension !== null) {
+                if (!["jpg", "jpeg", "gif", "png", "svg", "bmp", "ico", "tiff"].includes(extension.toLowerCase())) {
+                  return;
                 }
-                return;
-              }
-              extension = mime.getExtension(mediaType);
-              if (extension === null) {
-                if (this.verbose) {
-                  console.error("[Image Error]", `The image can't be processed : ${url}`);
-                }
-                return;
               }
               this.images.push({ id, url, dir, mediaType, extension });
             }
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            node.properties!.src = `images/${id}.${extension}`;
+            node.properties!.src = extension ? `images/${id}.${extension}` : `images/${id}`;
           };
 
           visit(tree, "element", processImgTags);
@@ -518,29 +530,19 @@ export class EPub {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async render(): Promise<any> {
-    if (this.verbose) {
-      console.log("Generating Template Files.....");
-    }
+    this.info("Generating Template Files.....");
     await this.generateTempFile(this.content);
 
-    if (this.verbose) {
-      console.log("Downloading Images...");
-    }
+    this.info("Downloading Images...");
     await this.downloadAllImage(this.images);
 
-    if (this.verbose) {
-      console.log("Making Cover...");
-    }
+    this.info("Making Cover...");
     await this.makeCover();
 
-    if (this.verbose) {
-      console.log("Generating Epub Files...");
-    }
+    this.info("Generating Epub Files...");
     await this.generate();
 
-    if (this.verbose) {
-      console.log("Done.");
-    }
+    this.info("Done.");
     return { result: "ok" };
   }
 
@@ -653,77 +655,86 @@ export class EPub {
 
     const destPath = resolve(this.tempEpubDir, `./OEBPS/cover.${this.coverExtension}`);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let writeStream: any;
     if (this.cover.slice(0, 4) === "http") {
-      const httpRequest = await axios.get(this.cover, {
-        responseType: "stream",
+      attach();
+      const raxConfig: RetryConfig = this.getRetryConfig(this.cover);
+      const imageBuffer = await axios.get(this.cover, {
+        raxConfig,
+        timeout: 50000,
+        responseType: "arraybuffer",
+        httpsAgent: new https.Agent({
+          rejectUnauthorized: this.rejectUnauthorized,
+        }),
         headers: { "User-Agent": this.userAgent },
       });
-      writeStream = httpRequest.data;
-      writeStream.pipe(createWriteStream(destPath));
+      const buffer = Buffer.from(imageBuffer.data, "base64");
+      writeFileSync(destPath, buffer);
+      this.info("[Success] cover image downloaded successfully!");
     } else {
-      writeStream = createReadStream(this.cover);
-      writeStream.pipe(createWriteStream(destPath));
+      const buffer = readFileSync(this.cover);
+      writeFileSync(destPath, buffer);
+      this.info("[Success] cover image downloaded successfully!");
     }
-
-    return new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      writeStream.on("error", (err: any) => {
-        console.error("Error", err);
-        unlinkSync(destPath);
-        reject(err);
-      });
-
-      writeStream.on("end", () => {
-        if (this.verbose) {
-          console.log("[Success] cover image downloaded successfully!");
-        }
-        resolve();
-      });
-    });
   }
 
   private async downloadImage(image: EpubImage): Promise<void> {
-    const filename = resolve(this.tempEpubDir, `./OEBPS/images/${image.id}.${image.extension}`);
+    const fullPath = image.extension ? `./OEBPS/images/${image.id}.${image.extension}` : `./OEBPS/images/${image.id}`;
+    const filename = resolve(this.tempEpubDir, fullPath);
 
     if (image.url.indexOf("file://") === 0) {
-      const auxpath = image.url.substr(7);
+      const auxpath = image.url.substring(7);
       fsExtra.copySync(auxpath, filename);
+      this.info("[Download Success]", image.url);
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let requestAction: any;
-    if (image.url.indexOf("http") === 0) {
-      const httpRequest = await axios.get(image.url, {
-        responseType: "stream",
-        headers: { "User-Agent": this.userAgent },
-      });
-      requestAction = httpRequest.data;
-      requestAction.pipe(createWriteStream(filename));
+    if (image.url.indexOf("http") === 0 || image.url.indexOf("//") === 0) {
+      attach();
+      if (image.url.indexOf("//") === 0) {
+        image.url = "http:" + image.url;
+      }
+      const raxConfig: RetryConfig = this.getRetryConfig(image.url);
+      try {
+        const imageBuffer = await axios.get(image.url, {
+          raxConfig,
+          timeout: 50000,
+          responseType: "arraybuffer",
+          httpsAgent: new https.Agent({
+            rejectUnauthorized: this.rejectUnauthorized,
+          }),
+          headers: { "User-Agent": this.userAgent },
+        });
+        const buffer = Buffer.from(imageBuffer.data, "base64");
+        writeFileSync(filename, buffer);
+        this.info("[Download Success]", image.url);
+      } catch (err) {
+        if ((err as AxiosError).response?.status === 404) {
+          this.info("[Download Skip] Image not found", image.url);
+          return;
+        }
+        this.info("[Download Error]", image.url, err);
+        throw err;
+      }
     } else {
-      requestAction = createReadStream(resolve(image.dir, image.url));
-      requestAction.pipe(createWriteStream(filename));
+      const buffer = readFileSync(resolve(image.dir, image.url));
+      writeFileSync(filename, buffer);
+      this.info("[Download Success]", image.url);
     }
 
-    return new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      requestAction.on("error", (err: any) => {
-        if (this.verbose) {
-          console.error("[Download Error]", "Error while downloading", image.url, err);
-        }
-        unlinkSync(filename);
-        reject(err);
-      });
+    return;
+  }
 
-      requestAction.on("end", () => {
-        if (this.verbose) {
-          console.log("[Download Success]", image.url);
-        }
-        resolve();
-      });
-    });
+  private getRetryConfig(url: string): RetryConfig {
+    return {
+      retry: this.retries,
+      retryDelay: this.retryDelay,
+      noResponseRetries: this.retries,
+      backoffType: "static",
+      onRetryAttempt: (err: AxiosError) => {
+        const cfg = getConfig(err);
+        this.info(`[Downloading] Retry attempt #${cfg?.currentRetryAttempt} ${url}`);
+      },
+    };
   }
 
   private async downloadAllImage(images: Array<EpubImage>): Promise<void> {
@@ -732,8 +743,12 @@ export class EPub {
     }
 
     mkdirSync(resolve(this.tempEpubDir, "./OEBPS/images"));
-    for (let index = 0; index < images.length; index++) {
-      await this.downloadImage(images[index]);
+
+    const imagesResults = concurrencyExecuter(this.concurrency)(this.downloadImage.bind(this))(images);
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _result of imagesResults) {
+      // wait for task to be finished
     }
   }
 
@@ -750,17 +765,13 @@ export class EPub {
     return new Promise((resolve, reject) => {
       const archive = archiver("zip", { zlib: { level: 9 } });
       const output = createWriteStream(this.output);
-      if (this.verbose) {
-        console.log("Zipping temp dir to", this.output);
-      }
+      this.info("Zipping temp dir to", this.output);
       archive.append("application/epub+zip", { store: true, name: "mimetype" });
       archive.directory(cwd + "/META-INF", "META-INF");
       archive.directory(cwd + "/OEBPS", "OEBPS");
       archive.pipe(output);
       archive.on("end", () => {
-        if (this.verbose) {
-          console.log("Done zipping, clearing temp dir...");
-        }
+        this.info("Done zipping, clearing temp dir...");
         fsExtra.removeSync(cwd);
         resolve();
       });

@@ -48,6 +48,8 @@
 		"mime": "^3.0.0",
 		"rehype-parse": "^8.0.4",
 		"rehype-stringify": "^9.0.3",
+		"retry-axios": "^3.0.0",
+		"rx-queue": "^1.0.5",
 		"unified": "^10.1.2",
 		"unist-util-visit": "^4.1.1",
 		"uslug": "^1.0.4"
