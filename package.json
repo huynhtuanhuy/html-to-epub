@@ -1,9 +1,9 @@
 {
 	"name": "@dimitrilahaye/html-to-epub",
-	"version": "3.1.1",
+	"version": "1.0.0",
 	"description": "A library to generate EPUB from HTML. Inspired by epub-gen.",
 	"license": "MIT",
-	"repository": "lesjoursfr/html-to-epub",
+	"repository": "dimitrilahaye/html-to-epub",
 	"homepage": "https://github.com/dimitrilahaye/html-to-epub#readme",
 	"bugs": {
 		"url": "https://github.com/dimitrilahaye/html-to-epub/issues"

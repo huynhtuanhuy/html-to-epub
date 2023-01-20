@@ -15,13 +15,13 @@ This epub library will generate temp html and download images in your DOMs, then
 Install the lib and add it as a dependency :
 
 ```
-    npm install @lesjoursfr/html-to-epub
+    npm install @dimitrilahaye/html-to-epub
 ```
 
 Then put this in your code:
 
 ```javascript
-const { EPub } = require("@lesjoursfr/html-to-epub");
+const { EPub } = require("@dimitrilahaye/html-to-epub");
 
 const epub = new EPub(option, output);
 epub.render()
