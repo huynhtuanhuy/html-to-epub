@@ -1,6 +1,6 @@
 {
 	"name": "@dimitrilahaye/html-to-epub",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "A library to generate EPUB from HTML. Inspired by epub-gen.",
 	"license": "MIT",
 	"repository": "dimitrilahaye/html-to-epub",
